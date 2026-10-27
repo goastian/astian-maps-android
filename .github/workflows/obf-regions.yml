@@ -1,0 +1,140 @@
+# Bake Astian Maps obf regions (routing section only by default, indexed lean; no rendering) in parallel and publish
+# them to the `obf-regions` release - the successor catalog to the GraphHopper routing graphs
+# (issue #214: a country's obf is roughly a quarter of the graph+pack it replaces). The app serves
+# this catalog automatically once obf-manifest.json has entries; while it is empty the legacy
+# graph catalog keeps serving, so this workflow IS the cutover switch.
+#
+# Race-safe matrix shape (the one the retired graph bake used): each region job uploads only its own
+# <id>.obf and emits a manifest-entry artifact; one merge job folds every entry into
+# obf-manifest.json in a single upload.
+name: Build obf regions
+
+on:
+  workflow_dispatch:
+    inputs:
+      group:
+        # A free-text STRING, not a choice: the selector takes a LIST now, and the sub-area groups
+        # are one per big country (16 of them), which would make an unusable dropdown - and a
+        # dropdown cannot express "brazil-sub,france-sub" or "all-sub" at all.
+        # Continents: us canada europe oceania asia south-america central-america africa
+        # Sub-areas:  <country>-sub (germany-sub, brazil-sub, france-sub, ...) or all-sub for every one
+        description: "Region group(s): one, several comma/space separated, or 'all-sub' for every sub-area group (ignored if 'ids' is set)"
+        type: string
+        default: europe
+      ids:
+        description: "Optional: space/comma-separated region ids (e.g. 'arizona utah colorado'). Overrides 'group'."
+        type: string
+        default: ""
+      skip_big:
+        description: "Skip large (big:true) regions for a quick run. Since the routing-only pre-filter (2026-09-11) most big rows fit; only the >1.3 GB extracts are still in doubt"
+        type: boolean
+        default: false
+      staging:
+        description: "Merge into obf-manifest-staging.json instead of the LIVE manifest (the live one is the fleet cutover switch)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: obf-regions-manifest
+  cancel-in-progress: false
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.sel.outputs.matrix }}
+      count: ${{ steps.sel.outputs.count }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: sel
+        env:
+          GROUP: ${{ inputs.group }}
+          IDS: ${{ inputs.ids }}
+          SKIP_BIG: ${{ inputs.skip_big }}
+        run: |
+          ids_json=$(jq -cn --arg s "$IDS" '$s | gsub(",";" ") | split(" ") | map(select(length > 0))')
+          # `group` accepts a LIST now, and the shorthand `all-sub` for every sub-area group at once
+          # (issue #254 added sub-areas for 15 big countries, and one dispatch per country would be
+          # 15 runs of the same thing). A single group name still behaves exactly as before.
+          groups_json=$(jq -cn --arg s "$GROUP" '$s | gsub(",";" ") | split(" ") | map(select(length > 0))')
+          sel=$(jq -c --arg group "$GROUP" --argjson groups "$groups_json" --argjson ids "$ids_json" --argjson skipBig "${SKIP_BIG:-false}" '
+            [ .regions[]
+              | select(
+                  if ($ids|length) > 0 then (.id as $rid | $ids | index($rid)) != null
+                  elif $group == "all-sub" then (.group | endswith("-sub"))
+                  else (.group as $g | $groups | index($g)) != null end
+                )
+              | select( ($skipBig | not) or (.big != true) )
+              | select( .skip_obf != true )
+              | {id, name, pbf_url} ]
+          ' tools/routing-regions.json)
+          n=$(printf '%s' "$sel" | jq 'length')
+          echo "selected $n region(s):"; printf '%s' "$sel" | jq -r '.[].id' | paste -sd' ' -
+          if [ "$n" -eq 0 ]; then echo "::error::no regions matched group='$GROUP' ids='$IDS'"; exit 1; fi
+          if [ "$n" -gt 256 ]; then echo "::error::$n regions > 256 matrix cap"; exit 1; fi
+          echo "matrix={\"include\":$sel}" >> "$GITHUB_OUTPUT"
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+      - name: Ensure the catalog release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view obf-regions --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create obf-regions --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "Offline obf regions" \
+              --notes "Astian Maps-baked obf files (routing section only by default, no rendering section) for offline routing. Data assets, not a code release."
+
+  build:
+    needs: prep
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.prep.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y osmium-tool jq unzip
+      - name: Bake ${{ matrix.id }} + upload obf + emit entry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASTIAN_REPO: ${{ github.repository }}
+          MANIFEST_MODE: emit
+          ENTRY_OUT: ${{ matrix.id }}.json
+        run: bash scripts/build-obf-region.sh "${{ matrix.id }}" "${{ matrix.name }}" "${{ matrix.pbf_url }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: entry-${{ matrix.id }}
+          path: ${{ matrix.id }}.json
+          retention-days: 1
+
+  merge:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: entries
+          pattern: entry-*
+          merge-multiple: true
+      - name: Merge entries into obf-manifest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASTIAN_REPO: ${{ github.repository }}
+          OBF_MANIFEST_NAME: ${{ inputs.staging && 'obf-manifest-staging.json' || 'obf-manifest.json' }}
+        run: |
+          shopt -s nullglob
+          files=(entries/*.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "no region entries were built, nothing to merge"; exit 0; fi
+          echo "merging ${#files[@]} entr(y/ies)"
+          bash scripts/merge-obf-manifest.sh entries

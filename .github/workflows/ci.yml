@@ -1,0 +1,338 @@
+name: CI
+
+# Three channels (2026-08-07). Pushes to main and canary BUILD + TEST only (the APK
+# rides as a workflow artifact) - a push no longer mints a release, so a burst of
+# pushes can never spam the release page again. The NIGHTLY prerelease is cut once
+# a day by the cron below (skipped when main has not moved since the last nightly),
+# or on demand via workflow_dispatch when a fix genuinely cannot wait for the cron.
+# The weekly promote-stable workflow still flips the newest nightly to stable.
+# canary is the working branch: batches assemble there and merge to main when ready.
+on:
+  schedule:
+    # Daily nightly cut, 10:30 UTC. Publishes only if main moved since the last v0.* tag.
+    - cron: '30 10 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Cut a release even if main has not moved since the last one
+        type: boolean
+        default: false
+  push:
+    branches: [ main, canary ]
+    # Docs-only pushes don't build or cut a nightly - nothing in the APK changed, and
+    # every push was minting a release (a dozen doc commits on 2026-07-09 became a dozen
+    # identical nightlies). A push that MIXES docs and code still builds: paths-ignore
+    # only skips when every changed file matches. Escape hatch either way: put
+    # "[skip ci]" in the commit subject to suppress a run, or touch any code file to
+    # force one. Keep this list to things that provably never reach the APK - workflow
+    # files are NOT ignored on purpose (they change the build itself).
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'fdroid/metadata/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'site/**'
+  pull_request:
+    branches: [ main ]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'fdroid/metadata/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'site/**'
+
+# `contents: write` is needed to publish releases. The publish step is gated to
+# push-to-main, so PRs (and fork PRs, whose token is read-only) never touch them.
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history + tags so the release step can build a changelog from the
+          # commits since the previous release.
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          # Default installs the legacy `tools` package, which drags in the
+          # Android Emulator — a large, flaky download that failed CI at the setup
+          # step ("ZipFile unknown archive"). We only build + unit-test, so
+          # platform-tools is enough; the Android Gradle Plugin fetches the
+          # platform + build-tools it needs on its own.
+          packages: platform-tools
+
+      - name: Check the Gradle wrapper
+        # The wrapper jar is the one binary in the repository; this checks it is Gradle's own.
+        uses: gradle/actions/wrapper-validation@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
+
+      - name: Decode release keystore (optional)
+        # If the secret isn't set the release APK is debug-signed — still
+        # installable for testing. app/build.gradle.kts handles the fallback.
+        env:
+          KEYSTORE_B64: ${{ secrets.ASTIAN_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/astian-release.jks"
+            echo "Decoded release keystore."
+          else
+            echo "No keystore secret — release APK will be debug-signed."
+          fi
+
+      - name: Fetch obf routing runtime jars
+        # OsmAnd's Java router + obf reader (:core's offline routing engine, GPLv3 like Astian Maps).
+        # No Maven artifacts exist, so they live on the fixed-tag `obf-runtime` release,
+        # gitignored out of the repo - same arrangement as the TTS AAR above.
+        run: |
+          mkdir -p core/libs
+          for f in osmand-java.jar osmand-shared-jvm.jar gnu-trove-osmand.jar kxml2-astian.jar; do
+            curl -fSL -o "core/libs/$f" \
+              "https://github.com/${{ github.repository }}/releases/download/obf-runtime/$f" \
+            || curl -fSL -o "core/libs/$f" \
+              "https://github.com/astian-org/astian-maps/releases/download/obf-runtime/$f"
+          done
+          test "$(stat -c%s core/libs/osmand-java.jar)" -gt 10000000
+          test "$(stat -c%s core/libs/osmand-shared-jvm.jar)" -gt 1000000
+          test "$(stat -c%s core/libs/gnu-trove-osmand.jar)" -gt 100000
+          test "$(stat -c%s core/libs/kxml2-astian.jar)" -gt 10000
+
+      - name: Unit tests
+        run: ./gradlew :core:test --no-daemon
+
+      - name: Check translations
+        # Android lint's MissingTranslation doesn't run on assemble/test, so a missed locale
+        # backfill ships silently (English shown for that key). Fail fast if any translatable
+        # string is absent from a locale or its placeholders drifted. Intentionally-English-only
+        # strings are marked translatable="false" in res/values/strings.xml and skipped.
+        run: python3 tools/check-translations.py
+
+      - name: Bake script tests
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+
+      - name: D-pad audit
+        # Every control has a focus ring and every gesture a key path (docs/dpad.md). Reads the
+        # source only; no device.
+        run: bash dpad_test_suite/audit_static.sh
+
+      - name: Derive build version
+        id: ver
+        # versionName is plain semver (0.5.<run>) so Obtainium can compare it. The minor is a name
+        # (0.4 until 2026-10-08): the run number is what orders releases, across minors too.
+        # versionCode is (2000+run)*10 since 2026-09-23 (was 2000+run): the last digit is the chip
+        # type in a per-chip build (app/build.gradle.kts `splits`, the ABI_SPLITS repo variable),
+        # 0 for the all-in-one APK. The jump is one-way and every build is still an upgrade; the
+        # in-app updater folds both scales onto 2000+run (update/ApkChoice.kt, legacyCode).
+        # NOTE: bumped from 0.1.<run> / 1000+run on 2026-06-18 — local dev builds
+        # had been hand-set with -PappVersionCode in the 1000s (up to 1117) and got
+        # installed on a test phone, leaving it *ahead* of the release line so
+        # Obtainium would reject the next release as a downgrade. 0.2 + 2000-base
+        # steps the release line decisively over that pollution. Keep local dev
+        # builds BELOW 1000 (e.g. -PappVersionCode=1) so this can't recur.
+        run: |
+          # Canary builds carry a -canary suffix in the NAME so About/version screens read
+          # honestly; the CODE stays on the one monotonic (2000+run)*10 line for every channel, so
+          # moving between canary/nightly/stable is always a plain upgrade for the installer.
+          if [ "${{ github.ref }}" = "refs/heads/canary" ]; then
+            echo "name=0.5.${{ github.run_number }}-canary" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.5.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "code=$(( (2000 + ${{ github.run_number }}) * 10 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch Cronet runtime AAR
+        # Chromium's own prebuilt Cronet for the version pinned in gradle.properties, packed as one
+        # AAR (gitignored). From the `cronet-runtime` infra release, else the upstream repo's, else
+        # packed right here from Chromium's bucket by the same script the release uses.
+        run: |
+          v=$(sed -n 's/^astian.cronetVersion=//p' gradle.properties)
+          f="app/libs/cronet-$v.aar"
+          mkdir -p app/libs
+          curl -fsSL -o "$f" "https://github.com/${{ github.repository }}/releases/download/cronet-runtime/cronet-$v.aar" \
+          || curl -fsSL -o "$f" "https://github.com/astian-org/astian-maps/releases/download/cronet-runtime/cronet-$v.aar" \
+          || bash scripts/build-cronet-aar.sh "$v" app/libs
+          test "$(stat -c%s "$f")" -gt 10000000
+
+      - name: Fetch TTS runtime AAR
+        # sherpa-onnx neural-TTS runtime (the Piper voices). It's a 57 MB prebuilt AAR (no Maven
+        # artifact) hosted on the fixed-tag `tts-runtime` release, gitignored out of the repo —
+        # fetch it into app/libs/ so :app can package the arm64 .so. Verify the size so a truncated
+        # download fails loud instead of producing a runtime-crashing APK.
+        run: |
+          mkdir -p app/libs
+          # The `tts-runtime` release only lives on the upstream repo, so a FORK's CI (github.repository
+          # = the fork) 404s. Try this repo first, then fall back to the upstream release.
+          curl -fSL -o app/libs/sherpa-onnx-1.13.3.aar \
+            "https://github.com/${{ github.repository }}/releases/download/tts-runtime/sherpa-onnx-1.13.3.aar" \
+          || curl -fSL -o app/libs/sherpa-onnx-1.13.3.aar \
+            "https://github.com/astian-org/astian-maps/releases/download/tts-runtime/sherpa-onnx-1.13.3.aar"
+          test "$(stat -c%s app/libs/sherpa-onnx-1.13.3.aar)" -gt 50000000
+
+      - name: Build release APK
+        env:
+          ASTIAN_KEYSTORE_PATH: ${{ runner.temp }}/astian-release.jks
+          ASTIAN_KEYSTORE_PASSWORD: ${{ secrets.ASTIAN_KEYSTORE_PASSWORD }}
+          ASTIAN_KEY_ALIAS: ${{ secrets.ASTIAN_KEY_ALIAS }}
+        run: >
+          ./gradlew :app:assembleRelease --no-daemon
+          -PappVersionName=${{ steps.ver.outputs.name }}
+          -PappVersionCode=${{ steps.ver.outputs.code }}
+          -PmaptilerKey=${{ secrets.MAPTILER_KEY }}
+          ${{ vars.ABI_SPLITS == 'true' && '-PabiSplits' || '' }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: astian-maps-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Publish canary build (rolling release)
+        # The canary CHANNEL: every push to the canary branch replaces the single APK on the
+        # fixed-tag `canary` release. Not a v0.* tag on purpose - the nightly/stable queries,
+        # the prune and the F-Droid build all bound to v0.* and never see it, and the in-app
+        # updater reads the versionCode line out of the release notes instead of the tag.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${{ steps.ver.outputs.name }}"
+          CODE="${{ steps.ver.outputs.code }}"
+          mapfile -t APKS < <(bash scripts/stage-apks.sh astian-maps-canary astian-maps-canary.apk)
+          # The newest change a USER can see (docs-only and comment-only commits are skipped,
+          # scripts/changelog.sh), falling back to the plain subject when nothing qualifies.
+          SUBJ="$(bash scripts/changelog.sh --latest HEAD)"
+          [ -z "$SUBJ" ] && SUBJ="$(git log -1 --no-merges --pretty=%s)"
+          # The in-app What's new dialog shows this body verbatim, so the first line is a label,
+          # not a warning paragraph (user 2026-09-15).
+          NOTES="$(printf 'Canary branch.\n\nversionName: %s\nversionCode: %s\n\nLatest change: %s\n' "$VER" "$CODE" "$SUBJ")"
+          # RECREATED on every push, not edited (2026-09-22): GitHub lists releases by creation
+          # date, so an edited-in-place release created in August sat fifteen rows down, under
+          # every nightly and every data release, and "where is canary 1753" was the question.
+          # Deleting and recreating moves it to the top, names it after the build, and moves the
+          # tag to the pushed commit; the download URL (releases/download/canary/...) and the
+          # updater's releases/tags/canary lookup are unchanged, with a few seconds of 404
+          # during the swap that the updater reads as "nothing newer".
+          # Retried as a pair (scripts/gh-retry.sh): a create refused by the API limit after the
+          # delete had gone through left users with no canary release until the next push.
+          # A build that a newer push has overtaken leaves the release to that newer build.
+          # Published late it would put an older APK on the channel, and when the newer push
+          # changed a workflow file GitHub refuses this run's tag: every retry answered HTTP 403
+          # for half an hour and the run ended red, ten times in ten days.
+          overtaken() {
+            local tip
+            tip="$(git ls-remote origin refs/heads/canary 2>/dev/null | cut -f1)"
+            [ -n "$tip" ] && [ "$tip" != "$GITHUB_SHA" ]
+          }
+          source scripts/gh-retry.sh
+          publish_canary() {
+            if overtaken; then
+              echo "canary has moved past ${GITHUB_SHA:0:9}: the newer build publishes."
+              return 0
+            fi
+            gh release delete canary --yes --cleanup-tag 2>/dev/null || true
+            gh release create canary --prerelease --target "$GITHUB_SHA" --title "Astian Maps $VER" --notes "$NOTES" "${APKS[@]}"
+          }
+          gh_retry publish_canary
+
+      - name: Publish nightly (prerelease)
+        # The nightly channel: ONE prerelease per day from the cron (or an on-demand
+        # dispatch for an urgent fix), never per push. Obtainium users who want nightlies
+        # turn on "include prereleases"; everyone else keeps tracking the latest stable
+        # release, which the weekly promote-stable workflow produces by flipping the
+        # newest nightly to a full release (same APK, no rebuild; nothing checks its health).
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Nothing new since the last nightly -> no release (the cron fires daily
+          # regardless; force=true on a manual dispatch overrides for a same-code recut).
+          LAST="$(git tag -l 'v0.[0-9]*' --sort=-v:refname | head -n1)"
+          if [ -n "$LAST" ] && \
+             [ "$(git rev-parse "${LAST}^{commit}")" = "$(git rev-parse HEAD)" ] && \
+             [ "${{ github.event.inputs.force || 'false' }}" != "true" ]; then
+            echo "main has not moved since $LAST - no nightly today."
+            exit 0
+          fi
+          VER="0.5.${{ github.run_number }}"
+          mapfile -t APKS < <(bash scripts/stage-apks.sh astian-maps "astian-maps-v${VER}.apk")
+          # Build the changelog from the commit subjects since the previous release. Our commit
+          # subjects are written as plain-language changelog lines, so this reads as real release
+          # notes (what Obtainium shows people), not a raw hash dump.
+          PREV="$LAST"
+          if [ -n "$PREV" ]; then
+            LOG="$(bash scripts/changelog.sh "${PREV}..HEAD")"
+            COMPARE="**Full changelog:** https://github.com/${{ github.repository }}/compare/${PREV}...v${VER}"
+          else
+            LOG="$(bash scripts/changelog.sh -n 20 HEAD)"
+            COMPARE=""
+          fi
+          [ -z "$LOG" ] && LOG="- Maintenance and internal changes"
+          # The title and the first line say NIGHTLY: the release page listed nightlies and
+          # stables with the same "Astian Maps 0.5.N" title and only the prerelease badge apart, and the
+          # in-app What's new dialog shows the body verbatim, so people could not tell which
+          # channel they were reading (user 2026-09-21). promote-stable.yml retitles and rewrites.
+          NOTES="$(printf 'Nightly build.\n\nWhat'\''s changed in %s\n\n%s\n\n%s\n' "$VER" "$LOG" "$COMPARE")"
+          source scripts/gh-retry.sh
+          publish_nightly() {
+            # A try refused half way (release made, an upload refused) is cleared before the next.
+            gh release delete "v${VER}" --yes --cleanup-tag 2>/dev/null || true
+            gh release create "v${VER}" \
+              --title "Astian Maps $VER nightly" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --notes "$NOTES" \
+              "${APKS[@]}"
+          }
+          gh_retry publish_nightly
+
+      - name: Prune old nightlies (stables are kept for good)
+        # STABLES ARE NEVER DELETED. They are the changelog, they are what somebody bisecting a
+        # regression needs to install, and their download counters are the only measure of reach
+        # this project has - a deleted release takes its counter with it. One a week at about a
+        # hundred megabytes is nothing beside the data catalogs this repo already hosts.
+        #
+        # Nightlies keep a rolling thirty, which is a month of bisect range and a month for the
+        # weekly reach snapshot (docs/stats) to record one before it goes.
+        #
+        # The FULL list of app releases, newest first (scripts/app-releases.sh): an earlier version
+        # used `gh release list --limit 200` and never saw past the newest 200, so hundreds of
+        # early nightlies sat untouched forever.
+        # The tag filter is LOAD BEARING: the infrastructure releases (tts-runtime, poi-packs,
+        # basemap-tiles, obf-regions, places-overlays, road-features, flock-cameras, asr-models)
+        # are prereleases too and host live download assets - only v0.* tags are app releases;
+        # never widen this filter.
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A listing that fails prunes nothing: the nightly above is already out, and a red
+          # run here would stop a release that is waiting on this one.
+          if ! GH_RETRY_TRIES=3 bash scripts/app-releases.sh > /tmp/app-releases.txt; then
+            echo "::warning::Could not list the releases; nothing pruned this run."
+            exit 0
+          fi
+          awk -F'\t' '$2 == "true" { print $1 }' /tmp/app-releases.txt | tail -n +31 > /tmp/doomed.txt
+          echo "keeping every stable; pruning $(wc -l < /tmp/doomed.txt) old nightlies"
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "pruning $tag"
+            gh release delete "$tag" --yes --cleanup-tag || true
+          done < /tmp/doomed.txt

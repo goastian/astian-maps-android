@@ -1,0 +1,266 @@
+name: F-Droid repo
+
+# Publishes Astian Maps' own F-Droid repository to GitHub Pages. Users add the repo URL
+# (see FDROID.md) to any F-Droid client and get updates like from any other repo.
+# Runs on every release event (nightly prereleases and weekly stable promotions
+# both fire "published"/"edited") and on manual dispatch.
+#
+# The repo serves the latest STABLE release plus the newest NIGHTLY when it is
+# ahead, so both channels are installable. The index is signed with a dedicated
+# repo key (secrets FDROID_KEYSTORE_BASE64 / FDROID_KEYSTORE_PASS); the APKs
+# keep the normal Astian Maps app signature.
+
+on:
+  # NOT `edited`: marking a release Latest or tweaking its notes is a metadata change that
+  # doesn't alter the APK, and it fired a SECOND run alongside `released` on a manual promote -
+  # two runs then raced the github-pages environment and invalidated each other's artifact
+  # (BlobNotFound, 2026-07-16). `published` (new release) and `released` (prerelease -> full,
+  # i.e. the promote itself) cover every case that needs a rebuild.
+  release:
+    types: [published, released]
+  # Releases created by CI's own GITHUB_TOKEN don't fire release events for other
+  # workflows (GitHub's anti-recursion rule), so nightly publishes never triggered
+  # this on their own - the index went stale until someone dispatched it by hand.
+  # workflow_run is the sanctioned workaround: rebuild whenever CI or the weekly
+  # promote finishes on main.
+  workflow_run:
+    workflows: ["CI", "Promote weekly stable"]
+    types: [completed]
+  # The project website (site/) ships in the SAME Pages artifact as the F-Droid
+  # repo and the map fonts - Pages replaces the whole site on every deploy, so a
+  # separate website workflow would wipe /repo and /fonts. A site-only push (CI
+  # skips those via paths-ignore) therefore redeploys from here. The docs site at /docs is
+  # built from the repository's Markdown, so a push that changes any of it redeploys too.
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '**.md'
+      - 'docs/**'
+      - 'scripts/build-docs-site.py'
+      - 'scripts/build-site-privacy.py'
+      # The website carries a copy of the signed settings file; a settings push republishes it.
+      - 'calibration.json'
+      - 'calibration.json.sig'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  # A run the job's own gate below will skip takes a group of its own. In the shared group it
+  # canceled the real run in progress and then did nothing: a pull request closing fired a
+  # workflow_run that killed the rebuild a push to main had just started (2026-10-08), and a
+  # data release could do the same.
+  group: ${{ ((github.event_name == 'workflow_run' && !(github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event != 'push')) || (github.event_name == 'release' && !startsWith(github.event.release.tag_name, 'v'))) && format('fdroid-repo-skip-{0}', github.run_id) || 'fdroid-repo' }}
+  # true (was false): each run rebuilds the entire index + site from scratch, so only the
+  # NEWEST run's output matters. Superseding an overlapping run is lossless and stops two
+  # deploys from racing the single github-pages environment (the BlobNotFound failure mode).
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Two gates:
+    #  - workflow_run: only rebuild after a SUCCESSFUL main run (a red CI published nothing),
+    #    and not after a PUSH run: a push builds and tests only, it releases nothing, so the
+    #    index would come out the same (it ran and got canceled on every main push, 2026-09-29).
+    #    The nightly cut (schedule / dispatch) and the weekly promotion are what change it.
+    #  - release: only for an APP release (tag like v0.5.2420). The infra/data releases
+    #    (asr-models, routing-graphs, map-fonts, tts-models, poi-packs, flock-cameras...) fire
+    #    release events too when their assets are updated, and two of them overlapping raced the
+    #    single github-pages environment and failed the deploy (2026-07-20). App tags start "v";
+    #    data tags don't, so this skips them.
+    if: >-
+      (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event != 'push'))
+      && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v'))
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Always main: a release event would check out the tagged commit and publish an older
+          # website and settings file over the newer ones.
+          ref: main
+
+      - name: Install fdroidserver
+        # pip, NOT apt: Ubuntu's fdroidserver 2.2.1 ships an androguard too old to parse
+        # APKs built by modern AGP ("res1 must be zero!"). fdroidserver 2.4 pulls androguard 4.x,
+        # which handles them. Versions are fixed in tools/fdroid-requirements.txt: this job holds the
+        # index signing key. apksigner comes from the runner's Android SDK.
+        run: |
+          pip install -r tools/fdroid-requirements.txt
+          fdroid --version
+
+      - name: Fetch the APKs to serve (latest stable + newest nightly if ahead)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          source scripts/gh-retry.sh
+          mkdir -p fdroid/repo
+          # App releases ONLY (v0.* tags): releases/latest and an unbounded newest-release
+          # query can both land on an infra file release (obf-runtime etc.), which has no APK
+          # and a tag the version math below cannot parse - that was the failed Monday builds.
+          # The whole list, newest first (scripts/app-releases.sh): a `--limit N` window can be
+          # all data releases.
+          apps="$(bash scripts/app-releases.sh)"
+          stable_tag=$(awk -F'\t' '$2 == "false" && $1 ~ /^v0[.][0-9]+[.][0-9]+$/ { print $1; exit }' <<<"$apps")
+          [ -n "$stable_tag" ] || { echo "no stable v0.* release found"; exit 1; }
+          echo "stable: $stable_tag"
+          # Remember the stable's version for the metadata pin below: the repo SUGGESTS the
+          # stable, so default F-Droid users only ever see weekly releases; the newer nightly
+          # in the index is treated as unstable and shown only to users who opt into
+          # unstable/beta updates for Astian Maps in their client.
+          # Each release is fetched into its own folder and renamed by tag: per-chip releases
+          # (2026-09-23) use the same file names every time (astian-maps-arm64.apk), which would
+          # collide between the stable and the nightly. Where a release has per-chip APKs the
+          # all-in-one one is left out: F-Droid clients pick the APK for their chip themselves,
+          # and GitHub Pages has a 1 GB budget.
+          fetch() {
+            local tag="$1" dir; dir="$(mktemp -d)"
+            gh_retry gh release download "$tag" -p '*.apk' -D "$dir" --repo "$GITHUB_REPOSITORY" --clobber || true
+            if ls "$dir"/*-arm64.apk >/dev/null 2>&1; then rm -f "$dir"/*-all.apk; fi
+            for f in "$dir"/*.apk; do
+              if [ -e "$f" ]; then mv "$f" "fdroid/repo/${tag}-$(basename "$f")"; fi
+            done
+          }
+          fetch "$stable_tag"
+          # The pin is the stable's highest versionCode, read off its APKs: the scale changed from
+          # 2000+run to (2000+run)*10 + chip digit on 2026-09-23, and reading the files is right on
+          # either side of that.
+          AAPT2="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/aapt2"
+          STABLE_CODE=0
+          for f in fdroid/repo/"${stable_tag}"-*.apk; do
+            c=$("$AAPT2" dump badging "$f" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+            if [ "${c:-0}" -gt "$STABLE_CODE" ]; then STABLE_CODE="$c"; fi
+          done
+          [ "$STABLE_CODE" -gt 0 ] || { echo "could not read the stable's versionCode"; exit 1; }
+          echo "STABLE_NAME=${stable_tag#v}" >> "$GITHUB_ENV"
+          echo "STABLE_CODE=$STABLE_CODE" >> "$GITHUB_ENV"
+          newest_tag=$(awk -F'\t' '$1 ~ /^v0[.][0-9]+[.][0-9]+$/ { print $1; exit }' <<<"$apps")
+          echo "newest: $newest_tag"
+          if [ "$newest_tag" != "$stable_tag" ]; then
+            fetch "$newest_tag"
+          fi
+          ls -la fdroid/repo
+          ls fdroid/repo/*.apk >/dev/null 2>&1 || { echo "no APKs to serve"; exit 1; }
+
+      - name: Write config + keystore
+        env:
+          FDROID_KEYSTORE_BASE64: ${{ secrets.FDROID_KEYSTORE_BASE64 }}
+          FDROID_KEYSTORE_PASS: ${{ secrets.FDROID_KEYSTORE_PASS }}
+        run: |
+          set -e
+          echo "$FDROID_KEYSTORE_BASE64" | base64 -d > fdroid/keystore.p12
+          cat > fdroid/config.yml <<EOF
+          repo_url: https://astian-org.github.io/astian-maps/repo
+          repo_name: Astian Maps
+          repo_icon: icon.png
+          repo_description: >-
+            Official repository for Astian Maps, the degoogled Google Maps
+            replacement. Serves the latest stable release and the newest
+            nightly build.
+          archive_older: 0
+          keystore: keystore.p12
+          repo_keyalias: fdroidrepo
+          keystorepass: $FDROID_KEYSTORE_PASS
+          keypass: $FDROID_KEYSTORE_PASS
+          EOF
+          chmod 0600 fdroid/config.yml
+          # Pin the suggested version to the stable (see the fetch step). Appended at build
+          # time so the committed metadata never goes stale.
+          {
+            echo "CurrentVersion: $STABLE_NAME"
+            echo "CurrentVersionCode: $STABLE_CODE"
+          } >> fdroid/metadata/org.astian.suite.maps.yml
+
+      - name: Build the signed repo index
+        run: |
+          cd fdroid
+          fdroid update --pretty
+          # Never ship the key material or the passworded config with the site.
+          rm -f keystore.p12 config.yml
+          ls -la repo
+
+      - name: Add map font glyphs to the site
+        # The basemap's Roboto glyph set (ui/map/MapFonts; built by
+        # scripts/build-map-fonts.sh) is served from this same Pages site at
+        # /Astian Maps/fonts/. The zip lives on the fixed-tag `map-fonts` release; skip
+        # quietly if that release doesn't exist yet so the F-Droid repo still
+        # deploys (the app probes the URL and falls back to Noto on a 404).
+        run: |
+          if curl -sfL -o map-fonts.zip https://github.com/${{ github.repository }}/releases/download/map-fonts/map-fonts.zip; then
+            mkdir -p fdroid/fonts
+            unzip -q -o map-fonts.zip -d fdroid/fonts
+            echo "Fonts added: $(find fdroid/fonts -name '*.pbf' | wc -l) glyph ranges"
+          else
+            echo "map-fonts release not found; site builds without fonts"
+          fi
+
+      - name: Add the website to the site root
+        # The landing page, the press page and the privacy page (site/*.html, site/style.css,
+        # site/assets, and privacy.html built from PRIVACY.md) serve at
+        # https://astian-org.github.io/astian-maps/ alongside /repo and /fonts. The press kit is
+        # zipped here from files already in the repository, so no archive is committed.
+        run: |
+          cp site/index.html site/press.html site/style.css fdroid/
+          cp -r site/assets fdroid/assets
+          # The privacy page is PRIVACY.md in the site's layout, so the two cannot drift.
+          pip install -r site/requirements-docs.txt
+          python3 scripts/build-site-privacy.py fdroid/privacy.html
+          kit=build/astian-press-kit
+          mkdir -p "$kit/screenshots" "$kit/logo"
+          cp docs/screenshots/*.png "$kit/screenshots/"
+          cp docs/logo.svg "$kit/logo/astian-logo.svg"
+          cp fdroid/icon.png "$kit/logo/astian-icon.png"
+          cp docs/not-google-maps.png site/press-kit/FACTS.md "$kit/"
+          (cd build && zip -qr ../fdroid/astian-press-kit.zip astian-press-kit)
+          ls fdroid
+
+      - name: Publish the website to maps.astian.org
+        # The same landing page, press page and press kit, on Cloudflare Pages (project
+        # `astianmaps`). GitHub Pages keeps serving them too, and stays the only home of /repo,
+        # /fonts and /docs: site/_redirects sends maps.astian.org/docs there. Skipped until the
+        # two secrets exist, so a fork or a fresh clone still deploys its GitHub Pages site.
+        # The signed settings file and its signature ride along: installed apps read this copy
+        # when GitHub does not answer (`AstianLinks.CALIBRATION_MIRROR`), so a closed account can
+        # still hand them a bundle whose links name the new home.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Cloudflare secrets not set; maps.astian.org not deployed"
+            exit 0
+          fi
+          out=build/astianmaps-site
+          mkdir -p "$out"
+          cp site/index.html site/press.html site/style.css site/_redirects fdroid/privacy.html fdroid/astian-press-kit.zip "$out/"
+          cp calibration.json calibration.json.sig "$out/"
+          cp -r site/assets "$out/assets"
+          npx --yes wrangler@4.143.0 pages deploy "$out" --project-name astianmaps --branch main --commit-dirty=true
+
+      - name: Build the docs site
+        # Every doc (the book, SPEC, FAQ, features, roadmap, contributor guides) as a searchable
+        # site at https://astian-org.github.io/astian-maps/docs/ (scripts/build-docs-site.py,
+        # site/mkdocs.yml). No request leaves the site: system fonts, local search index.
+        run: |
+          pip install -r site/requirements-docs.txt
+          python3 scripts/build-docs-site.py --strict
+          cp -r build/docs-site fdroid/docs
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: fdroid
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Astian Maps mark: a white map pin holding an "A" whose crossbar is the location dot.
+         Drawn in the 512-space of docs/logo.svg, scaled into the adaptive-icon safe zone. -->
+    <group
+        android:scaleX="0.15"
+        android:scaleY="0.15"
+        android:translateX="15.6"
+        android:translateY="15.9">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M256,440 C256,440 116,318 116,208 A140,140 0 0 1 396,208 C396,318 256,440 256,440 Z" />
+        <path
+            android:strokeColor="#2057C0"
+            android:strokeWidth="36"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M190,284 L256,150 L322,284" />
+        <path
+            android:fillColor="#FF8A3D"
+            android:pathData="M256,232 A20,20 0 1 1 256,272 A20,20 0 1 1 256,232 Z" />
+    </group>
+</vector>

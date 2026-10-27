@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Brand gradient behind the launcher pin, matching docs/logo.svg. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:angle="315"
+        android:startColor="#3B82F0"
+        android:endColor="#1A4DB0"
+        android:type="linear" />
+</shape>

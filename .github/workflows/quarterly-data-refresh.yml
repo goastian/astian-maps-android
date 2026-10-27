@@ -1,0 +1,48 @@
+# Quarterly rebake of the hosted open-data overlays: building footprints, address overlays,
+# and maxspeed overlays (six dispatches). Roads and addresses drift; a scheduled refresh keeps
+# the downloads current without anyone remembering to dispatch them by hand. Routing is not
+# here: the obf bake is a manual dispatch (see the comment on the steps below).
+#
+# Each downstream workflow is race-safe on its own (per-region assets + a serialized manifest
+# merge), so this job just fires the dispatches and exits; the builds run on their own clock.
+# Rebakes OVERWRITE the current-generation assets in place (same names, same manifest), so no
+# new generation accumulates - generations only fork when an asset FORMAT changes, which is
+# a manual cutover, never this cron.
+#
+# poi-packs has its own monthly cron and is deliberately not here.
+name: Quarterly data refresh
+
+on:
+  # No cron of its own: the bake conductor (bake-conductor.yml, tools/bake-schedule.json)
+  # dispatches it, one heavy bake at a time, with API budget to spare (2026-09-29).
+  workflow_dispatch: {} # manual full refresh whenever needed
+
+permissions:
+  actions: write # gh workflow run
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      # Routing: the obf bake (obf-regions.yml) stays a manual dispatch on purpose (runner memory
+      # limits and the staging -> live manifest copy are human steps); the GraphHopper graph
+      # refresh that used to run here went with the graphs (2026-09-15).
+      - name: Building overlays (all catalog groups)
+        run: |
+          for g in us world chunk; do
+            gh workflow run building-overlays.yml --repo "$REPO" -f group="$g"
+            sleep 5
+          done
+
+      - name: Address overlays (whole catalog)
+        run: gh workflow run address-overlays.yml --repo "$REPO" -f all=true
+
+      # The whole routing catalog is past GitHub's 256-job matrix cap, so it goes as two halves.
+      - name: Maxspeed overlays (whole catalog, two halves)
+        run: |
+          gh workflow run maxspeed-overlays.yml --repo "$REPO" -f all=true -f shard=a
+          sleep 5
+          gh workflow run maxspeed-overlays.yml --repo "$REPO" -f all=true -f shard=b
