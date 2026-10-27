@@ -4,7 +4,7 @@
 
 # Astian Maps for Android
 
-Native maps, search and turn-by-turn navigation. Offline regions, on-device voice, Android Auto.
+Native maps, search and turn-by-turn navigation with a community status report. Offline regions, on-device voice, Android Auto.
 
 </div>
 
