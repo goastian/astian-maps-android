@@ -21,8 +21,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "build", "docs-src")
 OUT = os.path.join(ROOT, "build", "docs-site")
-BLOB = "https://github.com/astian-org/astian-maps/blob/main/"
-TREE = "https://github.com/astian-org/astian-maps/tree/main/"
+BLOB = "https://github.com/goastian/astian-maps-android/blob/main/"
+TREE = "https://github.com/goastian/astian-maps-android/tree/main/"
 HOME = "https://astian-org.github.io/astian-maps/"
 
 # repository path -> published path (relative to the docs root)

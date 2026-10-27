@@ -2,9 +2,9 @@ Categories:
   - Navigation
 License: GPL-3.0-only
 AuthorName: Astian
-SourceCode: https://github.com/astian-org/astian-maps
-IssueTracker: https://github.com/astian-org/astian-maps/issues
-Changelog: https://github.com/astian-org/astian-maps/releases
+SourceCode: https://github.com/goastian/astian-maps-android
+IssueTracker: https://github.com/goastian/astian-maps-android/issues
+Changelog: https://github.com/goastian/astian-maps-android/releases
 
 Name: Astian Maps
 Summary: Google Maps data without Google's apps or tracking

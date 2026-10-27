@@ -35,7 +35,7 @@ bake_mapcreator() {
       cp "$MAPCREATOR_ZIP" "$dir/mapcreator.zip"
     else
       curl -fSL -o "$dir/mapcreator.zip" "https://github.com/$repo/releases/download/obf-tools/mapcreator.zip" \
-        || curl -fSL -o "$dir/mapcreator.zip" "https://github.com/astian-org/astian-maps/releases/download/obf-tools/mapcreator.zip"
+        || curl -fSL -o "$dir/mapcreator.zip" "https://github.com/goastian/astian-maps-android/releases/download/obf-tools/mapcreator.zip"
     fi
     unzip -q "$dir/mapcreator.zip" -d "$dir/mapcreator"
   fi

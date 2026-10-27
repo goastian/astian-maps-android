@@ -1,7 +1,7 @@
 # Building and running Astian Maps
 
 To install the app, use the Obtainium or F-Droid badge on the [README](../README.md) or an
-APK from [Releases](https://github.com/astian-org/astian-maps/releases). This page is for building
+APK from [Releases](https://github.com/goastian/astian-maps-android/releases). This page is for building
 from source.
 
 ## Build and run

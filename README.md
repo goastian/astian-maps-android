@@ -12,6 +12,82 @@ Package `org.astian.suite.maps`. Kotlin, Jetpack Compose and MapLibre Native, wi
 and no Play Services. It is a derivative of Vela (GPL-3.0); see [NOTICE.md](NOTICE.md) for the
 attribution and what Astian changed.
 
+## Screenshots
+
+All screenshots use the built-in location simulator, in Davis, California.
+
+### Map, places and search
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/01-map.png" width="200" alt="Dark map with quick categories"></td>
+    <td align="center"><img src="docs/screenshots/02-search.png" width="200" alt="Search results with ratings on the map"></td>
+    <td align="center"><img src="docs/screenshots/03-place.png" width="200" alt="Place page with photos, rating and actions"></td>
+    <td align="center"><img src="docs/screenshots/09-place-light.png" width="200" alt="Place page in the light theme"></td>
+  </tr>
+  <tr>
+    <td align="center">Map and quick categories</td>
+    <td align="center">Search</td>
+    <td align="center">Place page</td>
+    <td align="center">Light theme</td>
+  </tr>
+</table>
+
+### Community reports
+
+Report traffic, police, a crash, a hazard, a pothole, roadworks, a closure, weather or a camera
+in two taps. Reports reach every phone and the [web map](https://github.com/goastian/astian-maps-web)
+as they are sent; the web only shows them. No account, no name.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/12-community-map.png" width="200" alt="Map with community report pins and a jam painted on the road"></td>
+    <td align="center"><img src="docs/screenshots/13-community-report.png" width="200" alt="Card for a heavy traffic report with Still slow and Moving now"></td>
+    <td align="center"><img src="docs/screenshots/14-report-picker.png" width="200" alt="Report picker with the nine report types"></td>
+    <td align="center"><img src="docs/screenshots/15-community-dark.png" width="200" alt="Dark map showing every report type, a closure and roadworks"></td>
+  </tr>
+  <tr>
+    <td align="center">Reports on the map</td>
+    <td align="center">Confirm a report</td>
+    <td align="center">Make a report</td>
+    <td align="center">All types, dark map</td>
+  </tr>
+</table>
+
+### Directions and navigation
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/17-drive-directions.png" width="200" alt="Drive directions with the transport mode tabs"></td>
+    <td align="center"><img src="docs/screenshots/04-directions.png" width="200" alt="Route with alternatives and traffic"></td>
+    <td align="center"><img src="docs/screenshots/05-navigation.png" width="200" alt="Turn-by-turn navigation with speed limit"></td>
+    <td align="center"><img src="docs/screenshots/18-navigation-alert.png" width="200" alt="Navigation with a police report ahead"></td>
+  </tr>
+  <tr>
+    <td align="center">Drive, transit, walk, bike</td>
+    <td align="center">Alternatives</td>
+    <td align="center">Turn-by-turn</td>
+    <td align="center">Report ahead</td>
+  </tr>
+</table>
+
+### Transit, layers and themes
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/06-transit.png" width="200" alt="Transit route with departure options"></td>
+    <td align="center"><img src="docs/screenshots/07-bus-stop.png" width="200" alt="Bus stop page with upcoming departures"></td>
+    <td align="center"><img src="docs/screenshots/11-stop-list.png" width="200" alt="Stop list of a transit line with scheduled times"></td>
+    <td align="center"><img src="docs/screenshots/16-layers.png" width="200" alt="Layers panel with map types, details and place icons"></td>
+  </tr>
+  <tr>
+    <td align="center">Transit routes</td>
+    <td align="center">Stop departures</td>
+    <td align="center">Line stops</td>
+    <td align="center">Map types and layers</td>
+  </tr>
+</table>
+
 ## What it does
 
 [FEATURES.md](FEATURES.md) lists every feature in one line each; [SPEC.md](SPEC.md) and
@@ -35,7 +111,7 @@ scripts/dev-install.sh            # same build plus adb install, with the dev da
 ## Where it fits in the monorepo
 
 `apps/android` is the mobile client. The shared contracts, the API (`services/api`) and the web
-client live beside it; the plan that orders the work is [docs/plan_maps.md](../../docs/plan_maps.md).
+client ([goastian/astian-maps-web](https://github.com/goastian/astian-maps-web)) live beside it; the plan that orders the work is [docs/plan_maps.md](../../docs/plan_maps.md).
 
 ## Project links
 

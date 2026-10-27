@@ -49,9 +49,9 @@ object AstianLinks {
     const val COMMUNITY_API = "communityApi"
 
     private val DEFAULTS: Map<String, String> = mapOf(
-        REPO to "https://github.com/astian-org/astian-maps",
+        REPO to "https://github.com/goastian/astian-maps-android",
         API to "https://api.github.com/repos/astian-org/astian-maps",
-        RELEASES to "https://github.com/astian-org/astian-maps/releases/download",
+        RELEASES to "https://github.com/goastian/astian-maps-android/releases/download",
         RAW to "https://raw.githubusercontent.com/astian-org/astian-maps/main",
         SITE to "https://maps.astian.org",
         // The GitHub Pages address: the map fonts, the F-Droid repository and the docs. It is not

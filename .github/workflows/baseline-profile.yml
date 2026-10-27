@@ -46,7 +46,7 @@ jobs:
             curl -fSL -o "core/libs/$f" \
               "https://github.com/${{ github.repository }}/releases/download/obf-runtime/$f" \
             || curl -fSL -o "core/libs/$f" \
-              "https://github.com/astian-org/astian-maps/releases/download/obf-runtime/$f"
+              "https://github.com/goastian/astian-maps-android/releases/download/obf-runtime/$f"
           done
 
       - name: Fetch Cronet runtime AAR
@@ -58,7 +58,7 @@ jobs:
           f="app/libs/cronet-$v.aar"
           mkdir -p app/libs
           curl -fsSL -o "$f" "https://github.com/${{ github.repository }}/releases/download/cronet-runtime/cronet-$v.aar" \
-          || curl -fsSL -o "$f" "https://github.com/astian-org/astian-maps/releases/download/cronet-runtime/cronet-$v.aar" \
+          || curl -fsSL -o "$f" "https://github.com/goastian/astian-maps-android/releases/download/cronet-runtime/cronet-$v.aar" \
           || bash scripts/build-cronet-aar.sh "$v" app/libs
           test "$(stat -c%s "$f")" -gt 10000000
 
@@ -70,7 +70,7 @@ jobs:
           curl -fSL -o app/libs/sherpa-onnx-1.13.3.aar \
             "https://github.com/${{ github.repository }}/releases/download/tts-runtime/sherpa-onnx-1.13.3.aar" \
           || curl -fSL -o app/libs/sherpa-onnx-1.13.3.aar \
-            "https://github.com/astian-org/astian-maps/releases/download/tts-runtime/sherpa-onnx-1.13.3.aar"
+            "https://github.com/goastian/astian-maps-android/releases/download/tts-runtime/sherpa-onnx-1.13.3.aar"
 
       - name: Generate baseline profile
         run: |

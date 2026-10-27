@@ -3,8 +3,8 @@ body:
     attributes:
       value: |
         This is for questions about using Astian Maps. Something that is broken goes in a
-        [bug report](https://github.com/astian-org/astian-maps/issues/new?template=bug_report.yml), and something you
-        want added goes in a [feature request](https://github.com/astian-org/astian-maps/issues/new?template=feature_request.yml).
+        [bug report](https://github.com/goastian/astian-maps-android/issues/new?template=bug_report.yml), and something you
+        want added goes in a [feature request](https://github.com/goastian/astian-maps-android/issues/new?template=feature_request.yml).
         Those are tracked and closed when they are done. A question here is not.
 
         The [FAQ](https://astian-org.github.io/astian-maps/docs/) answers the common ones.

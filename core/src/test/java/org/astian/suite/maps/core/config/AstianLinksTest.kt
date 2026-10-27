@@ -13,7 +13,7 @@ class AstianLinksTest {
     }
 
     @Test fun `defaults derive the files from their bases`() {
-        assertEquals("https://github.com/astian-org/astian-maps/releases/download/obf-regions/obf-manifest.json", AstianLinks.obfManifest())
+        assertEquals("https://github.com/goastian/astian-maps-android/releases/download/obf-regions/obf-manifest.json", AstianLinks.obfManifest())
         assertEquals("https://raw.githubusercontent.com/astian-org/astian-maps/main/calibration.json", AstianLinks.calibration())
         assertEquals(AstianLinks.calibration() + ".sig", AstianLinks.calibrationSig())
         assertEquals("https://maps.astian.org/calibration.json", AstianLinks.calibrationMirror())
@@ -23,7 +23,7 @@ class AstianLinksTest {
         // The website and the Pages address are separate keys: moving the site leaves the fonts.
         AstianLinks.overrides = mapOf(AstianLinks.SITE to "https://astian.example")
         assertEquals("https://astian-org.github.io/astian-maps/fonts", AstianLinks.mapFonts())
-        assertEquals("https://github.com/astian-org/astian-maps/releases/download/voices/x.tar.bz2", AstianLinks.release("voices", "x.tar.bz2"))
+        assertEquals("https://github.com/goastian/astian-maps-android/releases/download/voices/x.tar.bz2", AstianLinks.release("voices", "x.tar.bz2"))
         assertEquals("https://api.github.com/repos/astian-org/astian-maps/releases/latest", AstianLinks.api("/releases/latest"))
     }
 
@@ -38,7 +38,7 @@ class AstianLinksTest {
         AstianLinks.overrides = mapOf(AstianLinks.RELEASES to "https://github.com/NewName/astian-maps/releases/download")
         assertEquals("https://github.com/NewName/astian-maps/releases/download/obf-regions/obf-manifest.json", AstianLinks.obfManifest())
         assertEquals("https://github.com/NewName/astian-maps/releases/download/fuel-gb/", AstianLinks.fuelGb())
-        assertEquals("https://github.com/astian-org/astian-maps", AstianLinks.repo())
+        assertEquals("https://github.com/goastian/astian-maps-android", AstianLinks.repo())
         AstianLinks.overrides = mapOf(AstianLinks.RAW to "https://example.org/astian", AstianLinks.PRIVACY to "https://example.org/privacy")
         assertEquals("https://example.org/astian/calibration.json", AstianLinks.calibration())
         assertEquals("https://example.org/privacy", AstianLinks.privacy())
