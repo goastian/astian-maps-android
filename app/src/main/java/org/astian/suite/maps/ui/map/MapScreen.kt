@@ -1030,7 +1030,7 @@ fun MapScreen(
     // A downloaded update that would cost this phone its Android Auto listing (issue #179). The
     // install source is what the head unit keys on and a self-install overwrites it, so the file
     // is offered instead: installing it through AAEnabler or King Installer keeps the car.
-    state.updateApkPending?.let {
+    if (BuildConfig.ALLOW_APK_INSTALLS) state.updateApkPending?.let {
         org.astian.suite.maps.ui.AstianDialog(
             onDismissRequest = { vm.dismissPendingUpdate() },
             title = stringResource(R.string.update_car_title),
@@ -2610,7 +2610,7 @@ fun MapScreen(
         val downloadsOk = !searchOpen
         val fasterOffer = state.navigating && state.fasterRoute != null
         if (state.status != null || fasterOffer ||
-            (bareMap && (state.notices.isNotEmpty() || state.updateInfo != null)) ||
+            (bareMap && (state.notices.isNotEmpty() || (BuildConfig.ALLOW_APK_INSTALLS && state.updateInfo != null))) ||
             (downloadsOk && (downloadingVoiceId != null || state.asrDownloadPct != null || downloadingRegion || state.areaDownloadPct != null))
         ) {
             val bannerBottom = with(LocalDensity.current) { navBannerBottomPx.toDp() }
@@ -2728,7 +2728,7 @@ fun MapScreen(
                 }
                 if (bareMap) {
                     // A newer release on GitHub (self-updater; the check is a Settings toggle).
-                    state.updateInfo?.let { u ->
+                    if (BuildConfig.ALLOW_APK_INSTALLS) state.updateInfo?.let { u ->
                         UpdateCard(
                             versionName = u.versionName,
                             notes = u.notes,

@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 DATA_BASE="${ASTIAN_DEV_DATA_BASE:-https://github.com/PimpinPumpkin/Vela/releases/download}"
 FONTS="${ASTIAN_DEV_FONTS_URL:-https://pimpinpumpkin.github.io/Vela/fonts}"
 
-./gradlew :app:assembleRelease \
+./gradlew :app:assembleRelease -PplayStore=false \
   -PobfManifestUrl="$DATA_BASE/obf-regions/obf-manifest.json" \
   -PoverlayManifestUrl="$DATA_BASE/building-overlays/building-overlay-manifest.json" \
   -PmaxspeedManifestUrl="$DATA_BASE/maxspeed-overlays/maxspeed-overlay-manifest.json" \

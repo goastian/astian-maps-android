@@ -1430,8 +1430,8 @@
     <string name="community_reported">Reportaste: %1$s</string>
     <string name="community_undo">Deshacer</string>
     <string name="community_merged">%1$s ya estaba reportado aquí. ¡Gracias!</string>
-    <string name="community_rate_limited">Demasiados reportes seguidos. Inténtalo en unos minutos.</string>
-    <string name="community_failed">No se pudo enviar el reporte. Revisa la conexión.</string>
+    <string name="community_rate_limited">Demasiadas solicitudes. Espera un momento y reintenta.</string>
+    <string name="community_failed">No se pudo confirmar. Inténtalo de nuevo.</string>
     <string name="community_withdrawn">Reporte retirado</string>
     <string name="community_ahead">%1$s a %2$s</string>
     <string name="community_ahead_spoken">%1$s reportado a %2$s</string>
@@ -1440,4 +1440,12 @@
     <string name="community_consent_ok">Entendido</string>
     <string name="settings_community">Reportes de la comunidad</string>
     <string name="settings_community_hint">Policía, accidentes, peligros y tráfico que reportan otros conductores, en el mapa y avisados mientras conduces, y un botón para reportarlos tú. Para traerlos se envía al servidor de Astian la zona alrededor del mapa. Desactivado, no se envía nada.</string>
+    <string name="community_sending">Enviando reporte…</string>
+    <string name="community_voting">Enviando respuesta…</string>
+    <string name="community_withdrawing">Retirando reporte…</string>
+    <string name="community_sent">Reporte enviado</string>
+    <string name="community_retry">Reintentar</string>
+    <string name="community_connection_failed">Sin conexión. Inténtalo de nuevo.</string>
+    <string name="community_expired">Este reporte ya venció.</string>
+    <string name="community_forbidden">Esta acción no está permitida.</string>
 </resources>

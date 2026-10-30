@@ -8,6 +8,8 @@ plugins {
     alias(libs.plugins.baselineprofile)
 }
 
+val playStore = providers.gradleProperty("playStore").map { it.toBooleanStrict() }.orElse(false).get()
+
 // android.util.Log and friends THROW "not mocked" in a JVM unit test otherwise, which turns a
 // logging line inside a runCatching into a mysterious failure of the thing being tested (cost an
 // afternoon on the delta applier). Same setting :core has had for the obf engine's logging.
@@ -18,6 +20,9 @@ dependencies {
     // Android's org.json is a STUB on the unit-test classpath: every method throws "not mocked",
     // so code that parses JSON (the delta patch header) cannot be tested without a real one.
     testImplementation("org.json:json:20240303")
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.uiautomator)
+    androidTestImplementation("androidx.test:runner:1.7.0")
 }
 
 android {
@@ -35,8 +40,9 @@ android {
         // Overridable from CI: -PappVersionCode / -PappVersionName (ci.yml derives them from the
         // run number: 0.5.<run> / (2000+run)*10 since 2026-09-23 (0.4.<run> until 2026-10-08), the last digit being the chip
         // type in a per-chip build, see `splits` below). Defaults are local/dev only.
-        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 3
+        versionCode = (project.findProperty("appVersionCode") as String?)?.toIntOrNull() ?: 4
         versionName = (project.findProperty("appVersionName") as String?) ?: "0.3.0"
+        buildConfigField("boolean", "ALLOW_APK_INSTALLS", (!playStore).toString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -222,6 +228,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    if (playStore) {
+        sourceSets.getByName("release").manifest.srcFile("src/play/AndroidManifest.xml")
+        sourceSets.getByName("debug").manifest.srcFile("src/play/AndroidManifest.xml")
     }
     packaging {
         resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" }

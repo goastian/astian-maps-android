@@ -65,7 +65,7 @@ jobs:
             || bash scripts/build-cronet-aar.sh "$v" app/libs
 
       - name: Build the per-chip release APKs
-        run: ./gradlew :app:assembleRelease -PabiSplits -PappVersionCode=100 -PappVersionName=smoke --no-daemon
+        run: ./gradlew :app:assembleRelease -PplayStore=false -PabiSplits -PappVersionCode=100 -PappVersionName=smoke --no-daemon
 
       - name: Enable KVM
         run: |

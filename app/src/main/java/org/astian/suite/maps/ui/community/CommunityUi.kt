@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +53,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -184,17 +186,25 @@ private fun AheadFeed(state: MapUiState, vm: MapViewModel) {
 @Composable
 internal fun ReportFab(modifier: Modifier = Modifier) {
     if (!CommunityReports.enabled.value) return
-    val label = stringResource(R.string.community_report)
+    val sending = CommunityReports.operations.value["report"]?.phase == CommunityReports.Phase.SENDING
+    val label = stringResource(if (sending) R.string.community_sending else R.string.community_report)
     NavFab(
         onClick = { CommunityReports.openPicker() },
-        modifier = modifier.dpadHighlight(CircleShape).semantics { contentDescription = label },
+        modifier = modifier.dpadHighlight(CircleShape).semantics {
+            contentDescription = label
+            if (sending) disabled()
+        },
     ) {
-        Icon(
-            painterResource(R.drawable.ic_incident_report),
-            contentDescription = null,
-            tint = REPORT_ACCENT,
-            modifier = Modifier.size(26.dp),
-        )
+        if (sending) {
+            CircularProgressIndicator(Modifier.size(26.dp), color = REPORT_ACCENT, strokeWidth = 2.dp)
+        } else {
+            Icon(
+                painterResource(R.drawable.ic_incident_report),
+                contentDescription = null,
+                tint = REPORT_ACCENT,
+                modifier = Modifier.size(26.dp),
+            )
+        }
     }
 }
 
@@ -390,10 +400,9 @@ private fun IncidentCard(incident: Incident, state: MapUiState, vm: MapViewModel
                 }
             }
             Spacer(Modifier.height(16.dp))
-            if (near) {
-                AnswerRow(incident, first) { present ->
+            if (near || CommunityReports.voting(incident.id) != null) {
+                AnswerRow(incident, vm, first) { present ->
                     CommunityReports.vote(vm, context, incident, present)
-                    vm.flashStatus(context.getString(R.string.community_thanks))
                 }
             } else {
                 Text(
@@ -409,7 +418,12 @@ private fun IncidentCard(incident: Incident, state: MapUiState, vm: MapViewModel
 /** "Not there" and "Still there" as the theme's own outlined and filled buttons, wide and tall
  *  enough to hit at a glance. A jam asks whether traffic is still slow. */
 @Composable
-private fun AnswerRow(incident: Incident, first: FocusRequester? = null, onAnswer: (Boolean) -> Unit) {
+private fun AnswerRow(incident: Incident, vm: MapViewModel, first: FocusRequester? = null, onAnswer: (Boolean) -> Unit) {
+    val operation = CommunityReports.voting(incident.id)
+    if (operation != null) {
+        OperationFeedback(operation, vm)
+        return
+    }
     val jam = incident.type == IncidentType.CONGESTION
     val shape = RoundedCornerShape(14.dp)
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -486,31 +500,106 @@ private fun BoxScope.TopSlot(state: MapUiState, vm: MapViewModel) {
         .fillMaxWidth()
 
     val sent = CommunityReports.lastSent.value
-    if (sent != null && sent.withdrawToken != null) {
-        LaunchedEffect(sent) {
+    val withdrawal = sent?.let { CommunityReports.withdrawing(it.incident.id) }
+    LaunchedEffect(sent, withdrawal) {
+        if (sent != null && withdrawal == null) {
             delay((UNDO_MS - (System.currentTimeMillis() - sent.atMs)).coerceAtLeast(0))
             if (CommunityReports.lastSent.value === sent) CommunityReports.lastSent.value = null
         }
-        SlotCard(modifier) {
-            Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                IncidentBadge(sent.incident.type, sent.incident.subtype, 36.dp)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    stringResource(R.string.community_reported, stringResource(CommunityReports.typeLabel(sent.incident.type))),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { CommunityReports.undo(vm, context) }, modifier = Modifier.dpadHighlight(CircleShape)) {
-                    Text(stringResource(R.string.community_undo), fontWeight = FontWeight.SemiBold)
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        CommunityReports.operations.value.values.filter { operation ->
+            operation.visible && when (val action = operation.action) {
+                is CommunityReports.Action.Report -> operation.phase != CommunityReports.Phase.CONFIRMED || sent?.withdrawToken == null
+                is CommunityReports.Action.Vote -> CommunityReports.selected.value?.id != action.incident.id &&
+                    CommunityReports.alert.value?.incident?.id != action.incident.id
+                is CommunityReports.Action.Withdraw -> true
+            }
+        }.forEach { operation ->
+            SlotCard(Modifier.fillMaxWidth()) {
+                Box(Modifier.padding(12.dp)) { OperationFeedback(operation, vm) }
+            }
+        }
+        if (sent != null && sent.withdrawToken != null && withdrawal == null) {
+            SlotCard(Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(start = 12.dp, end = 6.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IncidentBadge(sent.incident.type, sent.incident.subtype, 36.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        stringResource(R.string.community_reported, stringResource(CommunityReports.typeLabel(sent.incident.type))),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { CommunityReports.undo(vm, context) }, modifier = Modifier.dpadHighlight(CircleShape)) {
+                        Text(stringResource(R.string.community_undo), fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
         }
-        return
+        when (val alert = CommunityReports.alert.value) {
+            is AheadWatch.Heads -> HeadsCard(alert, Modifier.fillMaxWidth())
+            is AheadWatch.Ask -> AskCard(alert, vm, Modifier.fillMaxWidth())
+            null -> Unit
+        }
     }
-    when (val alert = CommunityReports.alert.value) {
-        is AheadWatch.Heads -> HeadsCard(alert, modifier)
-        is AheadWatch.Ask -> AskCard(alert, vm, modifier)
-        null -> Unit
+}
+
+@Composable
+private fun OperationFeedback(operation: CommunityReports.Operation, vm: MapViewModel) {
+    val context = LocalContext.current
+    var now by remember(operation) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(operation) {
+        if (operation.phase == CommunityReports.Phase.CONFIRMED) {
+            delay(4_500)
+            CommunityReports.dismissOperation(operation.action.key)
+        }
+        while (now < operation.retryAtMs) {
+            delay(1_000)
+            now = System.currentTimeMillis()
+        }
+    }
+    val message = when (operation.phase) {
+        CommunityReports.Phase.SENDING -> when (operation.action) {
+            is CommunityReports.Action.Report -> R.string.community_sending
+            is CommunityReports.Action.Vote -> R.string.community_voting
+            is CommunityReports.Action.Withdraw -> R.string.community_withdrawing
+        }
+        CommunityReports.Phase.CONFIRMED -> when (operation.action) {
+            is CommunityReports.Action.Report -> R.string.community_sent
+            is CommunityReports.Action.Vote -> R.string.community_thanks
+            is CommunityReports.Action.Withdraw -> R.string.community_withdrawn
+        }
+        CommunityReports.Phase.ERROR -> operation.failure?.message ?: R.string.community_failed
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (operation.phase == CommunityReports.Phase.SENDING) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
+        Text(
+            stringResource(message),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (operation.phase == CommunityReports.Phase.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        if (operation.phase == CommunityReports.Phase.ERROR) {
+            if (operation.failure?.retryable == true) {
+                TextButton(
+                    onClick = { CommunityReports.retry(vm, context, operation.action.key) },
+                    enabled = now >= operation.retryAtMs,
+                    modifier = Modifier.dpadHighlight(CircleShape),
+                ) { Text(stringResource(R.string.community_retry)) }
+            } else {
+                TextButton(onClick = {
+                    CommunityReports.dismissOperation(operation.action.key)
+                    val vote = operation.action as? CommunityReports.Action.Vote
+                    if (vote != null) {
+                        CommunityReports.watch.dismiss(vote.incident.id)
+                        if (CommunityReports.selected.value?.id == vote.incident.id) CommunityReports.selected.value = null
+                        if (CommunityReports.alert.value?.incident?.id == vote.incident.id) CommunityReports.alert.value = null
+                    }
+                }) { Text(stringResource(android.R.string.ok)) }
+            }
+        }
     }
 }
 
@@ -580,9 +669,8 @@ private fun AskCard(alert: AheadWatch.Ask, vm: MapViewModel, modifier: Modifier)
                 }
             }
             Box(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 14.dp)) {
-                AnswerRow(incident) { present ->
+                AnswerRow(incident, vm) { present ->
                     CommunityReports.vote(vm, context, incident, present)
-                    vm.flashStatus(context.getString(R.string.community_thanks))
                 }
             }
             TimeLeft(alert.shareLeft)

@@ -8,6 +8,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.astian.suite.maps.BuildConfig
+import org.astian.suite.maps.R
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,7 +44,7 @@ class VoiceInstaller @Inject constructor(
     /** Offered engines, all FOSS on F-Droid. SherpaTTS runs sherpa-onnx neural models (Kokoro is
      *  near-Siri quality) but needs a one-time model download; eSpeak is tiny + self-contained;
      *  RHVoice is in between. Best-first. */
-    val engines = listOf(
+    val engines = if (!BuildConfig.ALLOW_APK_INSTALLS) emptyList() else listOf(
         Engine(
             "org.woheller69.ttsengine", "SherpaTTS — neural (Kokoro)",
             "Best quality by far — near-Siri neural voices. After it installs, open SherpaTTS once and download a voice (the multi-speaker \"kokoro\" model is excellent; a few hundred MB), then pick SherpaTTS here.",
@@ -63,6 +65,7 @@ class VoiceInstaller @Inject constructor(
      *  built/fetched — e.g. eSpeak ships **per-ABI split APKs**, so the single
      *  `${pkg}_$vc.apk` path 404s and the one-tap download silently failed before. */
     suspend fun installFromFDroid(pkg: String): String? = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return@withContext context.getString(R.string.external_install_unavailable)
         val vc = latestVersionCode(pkg)
         val downloaded = vc != null && runCatching {
             val url = "https://f-droid.org/repo/${pkg}_$vc.apk"

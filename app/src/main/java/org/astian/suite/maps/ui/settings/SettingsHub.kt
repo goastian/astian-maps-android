@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.astian.suite.maps.BuildConfig
 import org.astian.suite.maps.R
 import org.astian.suite.maps.ui.map.MapUiState
 import org.astian.suite.maps.ui.dpadAutoFocus // D-pad-only operation (docs/dpad.md)
@@ -433,7 +434,8 @@ private val SEARCH_INDEX: List<Pair<Int, SettingsSection>> = listOf(
     // About
     R.string.settings_support to SettingsSection.ABOUT,
     R.string.settings_version to SettingsSection.ABOUT,
+) + if (BuildConfig.ALLOW_APK_INSTALLS) listOf(
     R.string.settings_update_auto to SettingsSection.ABOUT,
     R.string.settings_update_channel to SettingsSection.ABOUT,
     R.string.settings_update_check_now to SettingsSection.ABOUT,
-)
+) else emptyList()

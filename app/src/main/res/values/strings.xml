@@ -881,6 +881,7 @@
     <string name="download_notif_channel">Downloads</string>
     <string name="download_notif_title">Downloading %1$s</string> <!-- format -->
     <string name="download_label_update">Astian Maps update</string>
+    <string name="external_install_unavailable">Installing other apps is unavailable in this version.</string>
     <string name="download_label_map_data">map data</string>
     <string name="download_label_offline_places">offline places</string>
     <!-- Map-area tile download: progress card + one completion flash (was hardcoded English
@@ -1626,8 +1627,8 @@
     <string name="community_reported">Reported: %1$s</string>
     <string name="community_undo">Undo</string>
     <string name="community_merged">%1$s was already reported here. Thanks!</string>
-    <string name="community_rate_limited">Too many reports in a row. Try again in a few minutes.</string>
-    <string name="community_failed">The report could not be sent. Check the connection.</string>
+    <string name="community_rate_limited">Too many requests. Wait a moment and retry.</string>
+    <string name="community_failed">Could not confirm the action. Try again.</string>
     <string name="community_withdrawn">Report withdrawn</string>
     <string name="community_ahead">%1$s in %2$s</string>
     <string name="community_ahead_spoken">%1$s reported in %2$s</string>
@@ -1636,4 +1637,12 @@
     <string name="community_consent_ok">Got it</string>
     <string name="settings_community">Community reports</string>
     <string name="settings_community_hint">Police, crashes, hazards and traffic that other drivers report, on the map and announced while you drive, and a button to report them yourself. The area around the map is sent to Astian\'s server to fetch them. Off, nothing is sent.</string>
+    <string name="community_sending">Sending report…</string>
+    <string name="community_voting">Sending response…</string>
+    <string name="community_withdrawing">Withdrawing report…</string>
+    <string name="community_sent">Report sent</string>
+    <string name="community_retry">Retry</string>
+    <string name="community_connection_failed">No connection. Try again.</string>
+    <string name="community_expired">This report has expired.</string>
+    <string name="community_forbidden">This action is not allowed.</string>
 </resources>

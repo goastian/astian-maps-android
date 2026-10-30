@@ -85,6 +85,8 @@ internal class AheadWatch(private val clock: () -> Long = System::currentTimeMil
 
     fun answered(id: String) = finish(id)
 
+    fun dismiss(id: String) = finish(id)
+
     private fun finish(id: String) {
         remember(done, id)
         if (asking == id) asking = null

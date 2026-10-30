@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.astian.suite.maps.BuildConfig
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -74,6 +75,7 @@ class SelfUpdater @Inject constructor(
      *  changes), falling back to the newest nightly when that is ahead so a stale canary
      *  never strands its users behind the fleet. */
     suspend fun check(installedVersionCode: Int, channel: String = CHANNEL_STABLE): UpdateInfo? = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return@withContext null
         val currentVersionCode = legacyCode(installedVersionCode)
         runCatching {
             fun releaseToInfo(o: JSONObject): UpdateInfo? {
@@ -182,6 +184,7 @@ class SelfUpdater @Inject constructor(
      * deleted; it never reaches the installer.
      */
     suspend fun download(info: UpdateInfo, active: () -> Boolean = { true }, onProgress: (Int) -> Unit): File? = withContext(Dispatchers.IO) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return@withContext null
         val dir = File(context.filesDir, "updates").apply { mkdirs() }
         val dest = File(dir, "astian-${info.versionCode}.apk")
         val part = File(dir, "astian-${info.versionCode}.apk.part")
@@ -232,6 +235,7 @@ class SelfUpdater @Inject constructor(
 
     /** Hand [apk] to the system package installer (user confirms; OS verifies signature). */
     fun install(apk: File) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
         context.startActivity(
             Intent(Intent.ACTION_VIEW).apply {

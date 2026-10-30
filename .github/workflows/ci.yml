@@ -191,7 +191,7 @@ jobs:
           ASTIAN_KEYSTORE_PASSWORD: ${{ secrets.ASTIAN_KEYSTORE_PASSWORD }}
           ASTIAN_KEY_ALIAS: ${{ secrets.ASTIAN_KEY_ALIAS }}
         run: >
-          ./gradlew :app:assembleRelease --no-daemon
+          ./gradlew :app:assembleRelease -PplayStore=false --no-daemon
           -PappVersionName=${{ steps.ver.outputs.name }}
           -PappVersionCode=${{ steps.ver.outputs.code }}
           -PmaptilerKey=${{ secrets.MAPTILER_KEY }}

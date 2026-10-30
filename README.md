@@ -102,7 +102,7 @@ How the app reaches the network, request by request, is in [PRIVACY.md](PRIVACY.
 
 ```bash
 scripts/fetch-build-deps.sh       # once: prebuilt runtime binaries that are not in git
-./gradlew :app:assembleRelease    # R8 build; signed with the debug key unless ASTIAN_KEYSTORE_PATH is set
+./gradlew :app:assembleRelease -PplayStore=false # external APK; debug signing unless ASTIAN_KEYSTORE_PATH is set
 scripts/dev-install.sh            # same build plus adb install, with the dev data catalogs
 ```
 

@@ -3,6 +3,7 @@ package org.astian.suite.maps.ui.map
 import org.astian.suite.maps.ui.place.isListing
 import org.astian.suite.maps.ui.place.LinkTrip
 import android.content.Context
+import org.astian.suite.maps.BuildConfig
 import org.astian.suite.maps.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -1672,6 +1673,7 @@ class MapViewModel @Inject constructor(
      *  NB called from init{}, which runs BEFORE the later-declared `settingsPrefs` field
      *  initializer — resolve the prefs locally or this NPEs on launch (it did). */
     private fun maybeCheckForUpdate() {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         val prefs = appContext.getSharedPreferences("astian_settings", Context.MODE_PRIVATE)
         if (!prefs.getBoolean("self_update_check", true)) return
         val now = System.currentTimeMillis()
@@ -1688,6 +1690,10 @@ class MapViewModel @Inject constructor(
     /** Settings "Check for updates" button — unthrottled, reports back via [onResult]
      *  (true = an update was found and the card is up; false = already current / check failed). */
     fun checkForUpdateNow(onResult: (Boolean) -> Unit) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) {
+            onResult(false)
+            return
+        }
         val channel = org.astian.suite.maps.update.SelfUpdater.channel(settingsPrefs)
         viewModelScope.launch {
             val info = selfUpdater.check(org.astian.suite.maps.BuildConfig.VERSION_CODE, channel)
@@ -1780,6 +1786,7 @@ class MapViewModel @Inject constructor(
     }
 
     fun downloadUpdate() {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         val info = _state.value.updateInfo ?: return
         if (_state.value.updateDownloadPct != null) return // already downloading
         updateCancel.set(false)
@@ -1806,6 +1813,7 @@ class MapViewModel @Inject constructor(
     /** Install the held-back update anyway; the car will stop listing Astian Maps until it is installed
      *  again the way it was the first time. */
     fun installPendingUpdate() {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         val apk = _state.value.updateApkPending ?: return
         _state.update { it.copy(updateApkPending = null, updateInfo = null) }
         selfUpdater.install(apk)
@@ -1814,6 +1822,7 @@ class MapViewModel @Inject constructor(
     /** Hand the held-back APK out as a file, which is what AAEnabler and its siblings take. The
      *  card stays: nothing is installed until the user comes back through that tool. */
     fun sharePendingUpdate() {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         val apk = _state.value.updateApkPending ?: return
         _state.update { it.copy(updateApkPending = null) }
         runCatching { org.astian.suite.maps.update.InstallSource.shareApk(appContext, apk) }
@@ -8224,9 +8233,10 @@ class MapViewModel @Inject constructor(
 
     /** Open-source engines a phone with none can install in one tap (off F-Droid). */
     fun installableEngines(): List<VoiceInstaller.Engine> =
-        voiceInstaller.engines.filterNot { voiceInstaller.isInstalled(it.pkg) }
+        if (BuildConfig.ALLOW_APK_INSTALLS) voiceInstaller.engines.filterNot { voiceInstaller.isInstalled(it.pkg) } else emptyList()
 
     fun installVoiceEngine(engine: VoiceInstaller.Engine) {
+        if (!BuildConfig.ALLOW_APK_INSTALLS) return
         if (_state.value.installingEngine != null) return // one at a time
         _state.update { it.copy(installingEngine = engine.pkg) }
         viewModelScope.launch {

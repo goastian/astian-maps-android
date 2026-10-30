@@ -78,7 +78,7 @@ data class IncidentBox(val west: Double, val south: Double, val east: Double, va
     }
 }
 
-class IncidentApiException(val status: Int, message: String) : Exception(message)
+class IncidentApiException(val status: Int, message: String, val retryAfterMs: Long? = null) : Exception(message)
 
 data class IncidentCreated(val incident: Incident, val merged: Boolean, val withdrawToken: String?)
 
@@ -191,7 +191,13 @@ class IncidentsClient @Inject constructor(private val http: OkHttpClient) {
             val text = r.body?.string().orEmpty()
             if (!r.isSuccessful) {
                 val detail = runCatching { JSONObject(text).optString("detail") }.getOrNull().orEmpty()
-                throw IncidentApiException(r.code, detail.ifBlank { "HTTP ${r.code}" })
+                val retryAfter = r.header("Retry-After")?.let { value ->
+                    value.toLongOrNull()?.coerceIn(0, 86_400)?.times(1_000) ?: runCatching {
+                        (java.time.ZonedDateTime.parse(value, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                            .toInstant().toEpochMilli() - System.currentTimeMillis()).coerceAtLeast(0)
+                    }.getOrNull()
+                }
+                throw IncidentApiException(r.code, detail.ifBlank { "HTTP ${r.code}" }, retryAfter)
             }
             text
         }

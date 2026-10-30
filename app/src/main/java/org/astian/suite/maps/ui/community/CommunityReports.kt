@@ -6,6 +6,7 @@ import androidx.annotation.StringRes
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.astian.suite.maps.R
 import org.astian.suite.maps.core.community.Incident
@@ -39,8 +40,56 @@ object CommunityReports {
     /** The report just sent, for its Undo; null once the window has passed or it merged. */
     val lastSent = mutableStateOf<Sent?>(null)
 
-    /** True while a report is on its way. */
-    val busy = mutableStateOf(false)
+    enum class Phase { SENDING, CONFIRMED, ERROR }
+
+    enum class Failure(@StringRes val message: Int, val retryable: Boolean) {
+        CONNECTION(R.string.community_connection_failed, true),
+        RATE_LIMIT(R.string.community_rate_limited, true),
+        EXPIRED(R.string.community_expired, false),
+        FORBIDDEN(R.string.community_forbidden, false),
+        OTHER(R.string.community_failed, true),
+    }
+
+    sealed interface Action {
+        val key: String
+        data class Report(val type: IncidentType, val subtype: String?, val at: LatLng, val heading: Float?, val reporter: String) : Action {
+            override val key = "report"
+        }
+        data class Vote(val incident: Incident, val present: Boolean, val reporter: String) : Action {
+            override val key = "vote:${incident.id}"
+        }
+        data class Withdraw(val sent: Sent) : Action {
+            override val key = "withdraw:${sent.incident.id}"
+        }
+    }
+
+    data class Operation(
+        val action: Action,
+        val phase: Phase,
+        val failure: Failure? = null,
+        val retryAtMs: Long = 0,
+        val visible: Boolean = true,
+    )
+
+    val operations = mutableStateOf<Map<String, Operation>>(emptyMap())
+
+    fun voting(id: String) = operations.value["vote:$id"]
+    fun withdrawing(id: String) = operations.value["withdraw:$id"]
+
+    private fun put(operation: Operation) {
+        val kept = operations.value.toMutableMap()
+        kept[operation.action.key] = operation
+        while (kept.size > MINE_KEPT) {
+            val old = kept.entries.firstOrNull { it.value.phase == Phase.CONFIRMED } ?: break
+            kept.remove(old.key)
+        }
+        operations.value = kept
+    }
+
+    fun dismissOperation(key: String) {
+        val operation = operations.value[key] ?: return
+        if (operation.phase != Phase.SENDING) put(operation.copy(visible = false))
+    }
 
     /** The heads-up or the "Still there?" question on screen while driving, from [watch]. */
     internal val alert = mutableStateOf<AheadWatch.Alert?>(null)
@@ -112,6 +161,7 @@ object CommunityReports {
     }
 
     fun openPicker() {
+        if (operations.value["report"]?.phase == Phase.SENDING) return
         if (consented.value) pickerOpen.value = true else consentAsk.value = true
     }
 
@@ -172,46 +222,88 @@ object CommunityReports {
     }
 
     fun report(vm: MapViewModel, context: Context, type: IncidentType, subtype: String?, at: LatLng, heading: Float?) {
+        if (operations.value["report"]?.phase == Phase.SENDING) return
         pickerOpen.value = false
-        val label = context.getString(typeLabel(type))
-        vm.viewModelScope.launch {
-            busy.value = true
-            runCatching {
-                vm.incidents.create(type, subtype, at.lat, at.lng, heading?.toDouble(), reporterKey(context))
-            }.onSuccess { created ->
-                rememberMine(context, created.incident.id)
-                upsert(created.incident)
-                lastSent.value = Sent(created.incident, created.withdrawToken, created.merged, System.currentTimeMillis())
-                if (created.merged) vm.flashStatus(context.getString(R.string.community_merged, label))
-            }.onFailure {
-                vm.flashStatus(context.getString(if ((it as? IncidentApiException)?.status == 429) R.string.community_rate_limited else R.string.community_failed))
-            }
-            busy.value = false
-        }
+        submit(vm, context, Action.Report(type, subtype, at, heading, reporterKey(context)))
     }
 
     fun undo(vm: MapViewModel, context: Context) {
         val sent = lastSent.value ?: return
-        val token = sent.withdrawToken ?: return
-        lastSent.value = null
-        vm.viewModelScope.launch {
-            runCatching { vm.incidents.withdraw(sent.incident.id, token) }
-                .onSuccess {
-                    remove(sent.incident.id)
-                    vm.flashStatus(context.getString(R.string.community_withdrawn))
-                }
-                .onFailure { vm.flashStatus(context.getString(R.string.community_failed)) }
-        }
+        if (sent.withdrawToken == null) return
+        val previous = withdrawing(sent.incident.id)
+        if (previous != null) return retry(vm, context, previous.action.key)
+        submit(vm, context, Action.Withdraw(sent))
     }
 
     fun vote(vm: MapViewModel, context: Context, incident: Incident, present: Boolean) {
-        if (selected.value?.id == incident.id) selected.value = null
-        watch.answered(incident.id)
-        if (alert.value?.incident?.id == incident.id) alert.value = null
+        val previous = voting(incident.id)
+        if (previous != null) return
+        submit(vm, context, Action.Vote(incident, present, reporterKey(context)))
+    }
+
+    fun retry(vm: MapViewModel, context: Context, key: String) {
+        val previous = operations.value[key] ?: return
+        if (previous.phase != Phase.ERROR || previous.failure?.retryable != true || System.currentTimeMillis() < previous.retryAtMs) return
+        submit(vm, context, previous.action)
+    }
+
+    private fun submit(vm: MapViewModel, context: Context, action: Action) {
+        if (operations.value[action.key]?.phase == Phase.SENDING) return
+        put(Operation(action, Phase.SENDING))
         vm.viewModelScope.launch {
-            runCatching { vm.incidents.vote(incident.id, present, reporterKey(context)) }
-                .onSuccess { if (it.active) upsert(it.incident) else remove(incident.id) }
-                .onFailure { if ((it as? IncidentApiException)?.status == 404) remove(incident.id) }
+            try {
+                when (action) {
+                    is Action.Report -> {
+                        val created = vm.incidents.create(action.type, action.subtype, action.at.lat, action.at.lng, action.heading?.toDouble(), action.reporter)
+                        rememberMine(context, created.incident.id)
+                        upsert(created.incident)
+                        lastSent.value = Sent(created.incident, created.withdrawToken, created.merged, System.currentTimeMillis())
+                        val label = context.getString(typeLabel(action.type))
+                        vm.flashStatus(context.getString(if (created.merged) R.string.community_merged else R.string.community_reported, label))
+                    }
+                    is Action.Vote -> {
+                        val result = vm.incidents.vote(action.incident.id, action.present, action.reporter)
+                        if (result.active) upsert(result.incident) else remove(action.incident.id)
+                        watch.answered(action.incident.id)
+                        if (selected.value?.id == action.incident.id) selected.value = null
+                        if (alert.value?.incident?.id == action.incident.id) alert.value = null
+                        vm.flashStatus(context.getString(R.string.community_thanks))
+                    }
+                    is Action.Withdraw -> {
+                        vm.incidents.withdraw(action.sent.incident.id, requireNotNull(action.sent.withdrawToken))
+                        remove(action.sent.incident.id)
+                        if (lastSent.value === action.sent) lastSent.value = null
+                        vm.flashStatus(context.getString(R.string.community_withdrawn))
+                    }
+                }
+                put(Operation(action, Phase.CONFIRMED))
+            } catch (cancelled: CancellationException) {
+                put(Operation(action, Phase.ERROR, Failure.CONNECTION))
+                throw cancelled
+            } catch (error: Exception) {
+                val failure = when ((error as? IncidentApiException)?.status) {
+                    429 -> Failure.RATE_LIMIT
+                    404 -> Failure.EXPIRED
+                    403 -> Failure.FORBIDDEN
+                    else -> if (error is java.io.IOException) Failure.CONNECTION else Failure.OTHER
+                }
+                if (failure == Failure.EXPIRED) {
+                    val id = when (action) {
+                        is Action.Vote -> action.incident.id
+                        is Action.Withdraw -> action.sent.incident.id
+                        is Action.Report -> null
+                    }
+                    id?.let {
+                        remove(it)
+                        if (alert.value?.incident?.id == it) alert.value = null
+                        if (lastSent.value?.incident?.id == it) lastSent.value = null
+                    }
+                }
+                val retryAt = if (failure == Failure.RATE_LIMIT) {
+                    System.currentTimeMillis() + ((error as? IncidentApiException)?.retryAfterMs ?: 60_000L)
+                } else 0L
+                put(Operation(action, Phase.ERROR, failure, retryAt))
+            }
         }
     }
 
