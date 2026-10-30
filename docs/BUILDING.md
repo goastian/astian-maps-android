@@ -24,7 +24,7 @@ Set `ASTIAN_RUNTIME_BASE` to fetch them from another release base URL.
 
 # the build that goes on a phone (R8 and resource shrinking).
 # A debug build drops frames on the map and reads as a performance bug.
-./gradlew :app:assembleRelease
+./gradlew :app:assembleRelease -PplayStore=false
 
 # unit tests for the pure logic in :core (parsers, nav engine, routing, the name rules)
 ./gradlew :core:test
@@ -35,6 +35,22 @@ Release signing comes from environment variables (`ASTIAN_KEYSTORE_PATH`,
 debug keystore, so `adb install` still works. Do not hand out a local build with a
 `-PappVersionCode` above the release line: the next real release then looks like a downgrade.
 `-PappId=org.astian.suite.maps.dev` builds a copy that installs beside the real app.
+
+## Google Play bundle
+
+```bash
+./gradlew :app:bundleRelease -PplayStore=true
+```
+
+Play is the default in `gradle.properties`, including when generating a signed bundle from
+Android Studio. The bundle is written to `app/build/outputs/bundle/release/app-release.aab`
+and uses the configured version code and release signing. `-PplayStore=true` removes
+`REQUEST_INSTALL_PACKAGES` from the merged release and debug manifests and sets
+`BuildConfig.ALLOW_APK_INSTALLS` to `false`. This disables APK update checks, downloads,
+installation and update controls, as well as direct installation of external speech engines.
+The downloadable in-process voices and already-installed Android text-to-speech engines
+remain available. Use `-PplayStore=false` for the existing external-distribution behavior;
+the external release workflows and development install script set this explicitly.
 
 ## What CI does
 
